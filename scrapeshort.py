@@ -1,8 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import os
+import subprocess
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 def scrape_episode_links(url):
     response = requests.get(url)
@@ -35,51 +36,80 @@ def scrape_hd_link(url):
             break
     return hd_link
 
-def download_video(hd_link, episode_number):
+async def download_video(hd_link, episode_number):
     response = requests.get(hd_link, stream=True)
     if response.status_code == 200:
         os.makedirs("downloads", exist_ok=True)
         filename = f"downloads/Episode_{episode_number}.mp4"
+        
+        await update.message.reply_text(f"Starting download for Episode {episode_number}...")
+
         with open(filename, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
+
+        await update.message.reply_text(f"Download complete for Episode {episode_number}.")
         return filename
     return None
 
-def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text("Send me a URL and I'll download the video for you!")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Send me a URL and I'll download the video for you!")
 
-def handle_message(update: Update, context: CallbackContext) -> None:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     url = update.message.text
     episode_links = scrape_episode_links(url)
+    downloaded_files = []
 
     if episode_links:
         for index, link in enumerate(episode_links, start=1):
             full_link = f"https://shortflixme.site{link}"
             hd_link = scrape_hd_link(full_link)
             if hd_link:
-                video_file = download_video(hd_link, index)
+                video_file = await download_video(hd_link, index)
                 if video_file:
-                    with open(video_file, 'rb') as f:
-                        update.message.reply_video(f)
-                    os.remove(video_file)  # Hapus video setelah diupload
+                    downloaded_files.append(video_file)
                 else:
-                    update.message.reply_text("Failed to download video.")
+                    await update.message.reply_text("Failed to download video.")
             else:
-                update.message.reply_text("HD link not found.")
+                await update.message.reply_text("HD link not found.")
+
+        # Merge videos after downloading all
+        if downloaded_files:
+            await update.message.reply_text("Starting merge process...")
+            merged_file = "downloads/merged_video.mp4"
+            # Create the ffmpeg command
+            input_files = ' '.join(f"-i {file}" for file in downloaded_files)
+            ffmpeg_command = f"ffmpeg {input_files} -filter_complex 'concat=n={len(downloaded_files)}:v=1:a=1' -y {merged_file}"
+            
+            # Execute the command
+            subprocess.run(ffmpeg_command, shell=True, check=True)
+            await update.message.reply_text("Merge complete.")
+
+            # Upload the merged video
+            await update.message.reply_text("Starting upload...")
+            with open(merged_file, 'rb') as f:
+                await update.message.reply_video(f, caption="Here is your merged video!")
+            await update.message.reply_text("Upload complete.")
+
+            # Clean up downloaded files
+            for file in downloaded_files:
+                os.remove(file)
+            os.remove(merged_file)  # Remove the merged video after sending
+        else:
+            await update.message.reply_text("No videos were downloaded.")
     else:
-        update.message.reply_text("No episode links found or failed to access the URL.")
+        await update.message.reply_text("No episode links found or failed to access the URL.")
 
 def main():
     # Ganti 'YOUR_TOKEN' dengan token bot Anda
-    updater = Updater("7932643319:AAFaQy4-KjAAv0MZWzH9Qh0hHXsptuTMRiU")
-    dispatcher = updater.dispatcher
+    updater = ApplicationBuilder().token("7932643319:AAFaQy4-KjAAv0MZWzH9Qh0hHXsptuTMRiU").build()
+    
+    # Tambahkan handler
+    updater.add_handler(CommandHandler("start", start))
+    updater.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-
-    updater.start_polling()
-    updater.idle()
+    # Mulai bot
+    updater.run_polling()
 
 if __name__ == '__main__':
     main()
