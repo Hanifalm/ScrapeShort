@@ -102,7 +102,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 def main():
     # Ganti 'YOUR_TOKEN' dengan token bot Anda
-    updater = ApplicationBuilder().token("7932643319:AAFaQy4-KjAAv0MZWzH9Qh0hHXsptuTMRiU").build()
+    updater = ApplicationBuilder().token("8073329754:AAGq63AkumCruRyiYpI0rC-Cu6d8MwrrknQ").build()
     
     # Tambahkan handler
     updater.add_handler(CommandHandler("start", start))
